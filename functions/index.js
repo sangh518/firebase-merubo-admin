@@ -1,8 +1,11 @@
+// firebase deploy --only functions
+
 // v2 API를 사용하기 위해 가져오는 방식이 변경되었습니다.
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { logger } = require("firebase-functions"); // console.log 대신 logger를 권장합니다.
 const admin = require("firebase-admin");
 const axios = require("axios");
+const { onRequest } = require("firebase-functions/v2/https");
 
 // Firebase 앱 초기화
 admin.initializeApp();
@@ -35,14 +38,14 @@ exports.updateStreamerStatus = onSchedule(
           const streamerDocRef = doc.ref;
           const now = admin.firestore.FieldValue.serverTimestamp();
 
-          if (response.data && response.data.live) {
-            const liveData = response.data.live;
+          if (response.data && response.data.currentSumViewer) {
+            const currentSumViewer = response.data.currentSumViewer;
             logger.info(
-              `${streamerId}: 방송 중. 시청자 수: ${liveData.concurrent_user_count}`
+              `${streamerId}: 방송 중. 시청자 수: ${currentSumViewer}`
             );
             return streamerDocRef.update({
               isLive: true,
-              viewers: liveData.concurrent_user_count,
+              viewers: currentSumViewer,
               updatedAt: now,
             });
           } else {
@@ -68,55 +71,48 @@ exports.updateStreamerStatus = onSchedule(
   }
 );
 
-// // HTTP 요청으로 실행되는 함수를 가져옵니다.
-// const { onRequest } = require("firebase-functions/v2/https");
+// 스트리머 전체 목록을 조회하는 API 함수
+exports.getStreamerList = onRequest(
+  {
+    region: "asia-northeast3",
+    // 웹사이트 등 다른 도메인에서 이 API를 호출하려면 CORS 허용이 필수입니다.
+    cors: true,
+  },
+  async (req, res) => {
+    logger.info("스트리머 목록 조회 요청 수신");
 
-// // 스트리머를 추가하는 API 함수
-// exports.addStreamer = onRequest(
-//   {
-//     region: "asia-northeast3",
-//     cors: true, // 만약 웹사이트에서 이 API를 호출하려면 이 줄의 주석을 푸세요.
-//   },
-//   async (req, res) => {
-//     // 1. 요청에서 streamerId와 name을 추출합니다.
-//     // 예시: /addStreamer?id=ecvhao&name=우왁굳
-//     const streamerId = req.query.id;
-//     const streamerName = req.query.name;
+    try {
+      const streamersRef = db.collection("wakchidong/data/streamers");
+      const snapshot = await streamersRef.get();
 
-//     // 2. id나 name이 없으면 에러를 반환합니다.
-//     if (!streamerId || !streamerName) {
-//       logger.error("스트리머 ID와 이름이 모두 필요합니다.");
-//       res.status(400).json({
-//         status: "error",
-//         message: "Query parameters 'id' and 'name' are required.",
-//       });
-//       return;
-//     }
+      if (snapshot.empty) {
+        logger.info("DB에 스트리머 데이터가 없습니다.");
+        // 데이터가 없어도 성공 응답으로 빈 배열을 보냅니다.
+        res.status(200).json({ data: [] });
+        return;
+      }
 
-//     try {
-//       // 3. Firestore에 저장할 데이터를 준비합니다.
-//       const streamerRef = db
-//         .collection("wakchidong/data/streamers")
-//         .doc(streamerId);
-//       await streamerRef.set({
-//         streamerId: streamerId,
-//         name: streamerName,
-//         isLive: false, // 기본값
-//         viewers: 0, // 기본값
-//         updatedAt: admin.firestore.FieldValue.serverTimestamp(), // 현재 시간
-//       });
+      // Firestore 문서들을 깔끔한 객체 배열로 변환합니다.
+      const streamerList = snapshot.docs.map((doc) => {
+        const data = doc.data();
+        return {
+          streamerId: data.streamerId,
+          name: data.name,
+          isLive: data.isLive,
+          viewers: data.viewers,
+          // JavaScript에서 사용할 수 있도록 Timestamp를 ISO 문자열로 변환
+          updatedAt: data.updatedAt.toDate().toISOString(),
+        };
+      });
 
-//       logger.info(`새로운 스트리머 추가 성공: ${streamerId} (${streamerName})`);
-//       res.status(200).json({
-//         status: "success",
-//         message: `Streamer ${streamerId} added successfully.`,
-//       });
-//     } catch (error) {
-//       logger.error(`스트리머 추가 중 에러 발생:`, error);
-//       res.status(500).json({
-//         status: "error",
-//         message: "Failed to add streamer.",
-//       });
-//     }
-//   }
-// );
+      // 성공적으로 데이터를 조회했으면 JSON 형태로 응답합니다.
+      res.status(200).json({ data: streamerList });
+    } catch (error) {
+      logger.error("스트리머 목록 조회 중 에러 발생:", error);
+      res.status(500).json({
+        status: "error",
+        message: "Failed to retrieve streamer list.",
+      });
+    }
+  }
+);
