@@ -68,55 +68,55 @@ exports.updateStreamerStatus = onSchedule(
   }
 );
 
-// HTTP 요청으로 실행되는 함수를 가져옵니다.
-const { onRequest } = require("firebase-functions/v2/https");
+// // HTTP 요청으로 실행되는 함수를 가져옵니다.
+// const { onRequest } = require("firebase-functions/v2/https");
 
-// 스트리머를 추가하는 API 함수
-exports.addStreamer = onRequest(
-  {
-    region: "asia-northeast3",
-    cors: true, // 만약 웹사이트에서 이 API를 호출하려면 이 줄의 주석을 푸세요.
-  },
-  async (req, res) => {
-    // 1. 요청에서 streamerId와 name을 추출합니다.
-    // 예시: /addStreamer?id=ecvhao&name=우왁굳
-    const streamerId = req.query.id;
-    const streamerName = req.query.name;
+// // 스트리머를 추가하는 API 함수
+// exports.addStreamer = onRequest(
+//   {
+//     region: "asia-northeast3",
+//     cors: true, // 만약 웹사이트에서 이 API를 호출하려면 이 줄의 주석을 푸세요.
+//   },
+//   async (req, res) => {
+//     // 1. 요청에서 streamerId와 name을 추출합니다.
+//     // 예시: /addStreamer?id=ecvhao&name=우왁굳
+//     const streamerId = req.query.id;
+//     const streamerName = req.query.name;
 
-    // 2. id나 name이 없으면 에러를 반환합니다.
-    if (!streamerId || !streamerName) {
-      logger.error("스트리머 ID와 이름이 모두 필요합니다.");
-      res.status(400).json({
-        status: "error",
-        message: "Query parameters 'id' and 'name' are required.",
-      });
-      return;
-    }
+//     // 2. id나 name이 없으면 에러를 반환합니다.
+//     if (!streamerId || !streamerName) {
+//       logger.error("스트리머 ID와 이름이 모두 필요합니다.");
+//       res.status(400).json({
+//         status: "error",
+//         message: "Query parameters 'id' and 'name' are required.",
+//       });
+//       return;
+//     }
 
-    try {
-      // 3. Firestore에 저장할 데이터를 준비합니다.
-      const streamerRef = db
-        .collection("wakchidong/data/streamers")
-        .doc(streamerId);
-      await streamerRef.set({
-        streamerId: streamerId,
-        name: streamerName,
-        isLive: false, // 기본값
-        viewers: 0, // 기본값
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(), // 현재 시간
-      });
+//     try {
+//       // 3. Firestore에 저장할 데이터를 준비합니다.
+//       const streamerRef = db
+//         .collection("wakchidong/data/streamers")
+//         .doc(streamerId);
+//       await streamerRef.set({
+//         streamerId: streamerId,
+//         name: streamerName,
+//         isLive: false, // 기본값
+//         viewers: 0, // 기본값
+//         updatedAt: admin.firestore.FieldValue.serverTimestamp(), // 현재 시간
+//       });
 
-      logger.info(`새로운 스트리머 추가 성공: ${streamerId} (${streamerName})`);
-      res.status(200).json({
-        status: "success",
-        message: `Streamer ${streamerId} added successfully.`,
-      });
-    } catch (error) {
-      logger.error(`스트리머 추가 중 에러 발생:`, error);
-      res.status(500).json({
-        status: "error",
-        message: "Failed to add streamer.",
-      });
-    }
-  }
-);
+//       logger.info(`새로운 스트리머 추가 성공: ${streamerId} (${streamerName})`);
+//       res.status(200).json({
+//         status: "success",
+//         message: `Streamer ${streamerId} added successfully.`,
+//       });
+//     } catch (error) {
+//       logger.error(`스트리머 추가 중 에러 발생:`, error);
+//       res.status(500).json({
+//         status: "error",
+//         message: "Failed to add streamer.",
+//       });
+//     }
+//   }
+// );
