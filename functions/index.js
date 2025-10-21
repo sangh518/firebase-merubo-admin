@@ -4,11 +4,15 @@
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { logger } = require("firebase-functions"); // console.log 대신 logger를 권장합니다.
 const admin = require("firebase-admin");
-const axios = require("axios");
-const { onRequest } = require("firebase-functions/v2/https");
 
 // Firebase 앱 초기화
 admin.initializeApp();
+
+const axios = require("axios");
+const { onRequest } = require("firebase-functions/v2/https");
+const { syncYouTubeVideos, triggerYouTubeSync } = require("./youtubeVideoSync");
+const { getAggregatedList } = require("./videosListApi");
+
 const db = admin.firestore();
 
 // v2 방식으로 스케줄 함수를 정의합니다.
@@ -167,3 +171,7 @@ exports.getStreamerStatus = onRequest(
     }
   }
 );
+
+exports.syncYouTubeVideos = syncYouTubeVideos;
+exports.triggerYouTubeSync = triggerYouTubeSync;
+exports.getAggregatedList = getAggregatedList;
