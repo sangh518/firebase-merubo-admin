@@ -549,14 +549,13 @@ async function fetchImage(url) {
  */
 async function uploadAtlas(buffer) {
   const bucket = storage.bucket(); // 기본 버킷 사용
-  const filePath = `vuster-atlas/thumbnails_${Date.now()}.jpg`; // 파일 경로
+  const filePath = `vuster-atlas/thumbnails.jpg`; // 파일 경로
   const file = bucket.file(filePath);
 
   // 1. 파일 업로드
   await file.save(buffer, {
     metadata: {
       contentType: "image/jpeg",
-      cacheControl: "public, max-age=3600", // 1시간 캐시 (선택 사항)
     },
   });
 
