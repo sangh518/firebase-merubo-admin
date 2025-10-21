@@ -116,3 +116,54 @@ exports.getStreamerList = onRequest(
     }
   }
 );
+
+/**
+ * [신규] 특정 스트리머의 현재 상태를 즉시 조회하여 반환하는 API
+ * - 클라이언트에서 5초마다 직접 호출하기 위한 용도입니다.
+ */
+exports.getStreamerStatus = onRequest(
+  {
+    region: "asia-northeast3",
+    cors: true, // 웹사이트에서 호출할 수 있도록 CORS 허용
+  },
+  async (req, res) => {
+    // GET 요청의 쿼리 파라미터에서 streamerId를 가져옵니다. (e.g., /getStreamerStatus?streamerId=...)
+    const { streamerId } = req.query;
+    if (!streamerId) {
+      return res
+        .status(400)
+        .json({ error: "Query parameter 'streamerId' is required." });
+    }
+
+    logger.info(`실시간 상태 조회 요청: ${streamerId}`);
+    const soopApiUrl = `https://api-channel.sooplive.co.kr/v1.1/channel/${streamerId}/home/section/broad`;
+
+    try {
+      const response = await axios.get(soopApiUrl);
+      let isLive = false;
+      let viewers = 0;
+
+      if (response.data && response.data.currentSumViewer) {
+        isLive = true;
+        viewers = response.data.currentSumViewer;
+      }
+
+      // 클라이언트에게 실시간 데이터를 즉시 반환
+      res.status(200).json({
+        streamerId: streamerId,
+        isLive: isLive,
+        viewers: viewers,
+        retrievedAt: new Date().toISOString(), // 조회된 시간
+      });
+    } catch (error) {
+      logger.error(
+        `실시간 상태 조회 중 에러 발생 (${streamerId}):`,
+        error.message
+      );
+      res.status(500).json({
+        status: "error",
+        message: `Failed to retrieve status for ${streamerId}.`,
+      });
+    }
+  }
+);
