@@ -154,15 +154,35 @@ async function processStreamer(streamerDoc, youtube) {
   logger.info(`'${streamerName}' (Channel ID: ${channelId}) 처리 시작...`);
 
   try {
-    // 1. 최근 1달간의 모든 비디오 ID 목록 가져오기
-    const videoIds = await fetchRecentVideoIds(channelId, youtube);
-    if (videoIds.length === 0) {
-      logger.info(`'${streamerName}'의 최근 동영상이 없습니다.`);
+    // [신규] 1. 채널 구독자 수 가져오기 (비디오 처리와 병렬 실행)
+    const subscriberPromise = fetchChannelSubscriberCount(channelId, youtube);
+
+    // [신규] 2. 비디오 ID 및 상세 정보 가져오기 (기존 로직)
+    const videoPromise = (async () => {
+      const videoIds = await fetchRecentVideoIds(channelId, youtube);
+      if (videoIds.length === 0) {
+        logger.info(`'${streamerName}'의 최근 동영상이 없습니다.`);
+        return []; // 비어있는 배열 반환
+      }
+      return await fetchVideoDetails(videoIds, youtube);
+    })();
+
+    // [신규] 1번과 2번 병렬 실행
+    const [subscriberCount, videoDetails] = await Promise.all([
+      subscriberPromise,
+      videoPromise,
+    ]);
+
+    // [신규] 3. 구독자 수 Firestore에 업데이트
+    // (null이 아닌 경우에만 업데이트. null은 API 오류 또는 채널 없음)
+    if (subscriberCount !== null) {
+      await streamerDoc.ref.update({
+        subscriberCount: subscriberCount,
+      });
+      logger.info(`'${streamerName}' 구독자 수 업데이트: ${subscriberCount}`);
+    } else {
+      logger.warn(`'${streamerName}'의 구독자 수를 가져오지 못했습니다.`);
     }
-
-    // 2. 비디오 ID 목록으로 상세 정보 (썸네일 URL 포함) 가져오기
-    const videoDetails = await fetchVideoDetails(videoIds, youtube);
-
     // 3. Firestore 서브컬렉션 참조
     const videosRef = streamerDoc.ref.collection("videos");
 
@@ -285,6 +305,41 @@ async function fetchVideoDetails(videoIds, youtube) {
   } catch (error) {
     logger.error(`[YouTube API Error] videos.list :`, error.message);
     return [];
+  }
+}
+
+/**
+ * [YouTube API] 3. 채널 ID로 구독자 수를 가져옵니다.
+ * (신규 추가된 함수)
+ * @returns {Promise<number|null>} 구독자 수 또는 실패 시 null
+ */
+async function fetchChannelSubscriberCount(channelId, youtube) {
+  try {
+    const response = await youtube.channels.list({
+      part: "statistics",
+      id: channelId,
+    });
+
+    if (response.data.items && response.data.items.length > 0) {
+      const stats = response.data.items[0].statistics;
+
+      // 구독자 수를 비공개한 채널 처리
+      if (stats.hiddenSubscriberCount) {
+        logger.info(`'${channelId}' 채널은 구독자 수를 비공개했습니다.`);
+        return 0; // 비공개 시 0으로 처리 (혹은 -1 등 특별한 값)
+      }
+
+      return parseInt(stats.subscriberCount) || 0;
+    } else {
+      logger.warn(`[YouTube API] 채널을 찾을 수 없습니다: ${channelId}`);
+      return null;
+    }
+  } catch (error) {
+    logger.error(
+      `[YouTube API Error] channels.list (${channelId}):`,
+      error.message
+    );
+    return null; // API 오류 시 null 반환
   }
 }
 

@@ -83,6 +83,7 @@ exports.getAggregatedList = onRequest(
           return {
             name: streamerData.name,
             soopId: streamerData.soopId,
+            subscriberCount: streamerData.subscriberCount ?? 0,
             shorts: shortsList,
             longs: longsList,
           };
