@@ -289,7 +289,8 @@ async function fetchVideoDetails(videoIds, youtube) {
 
           videoDetails.push({
             videoId: item.id,
-            title: item.snippet.title,
+            title: preprocessTitle(item.snippet.title),
+            rawTitle: item.snippet.title,
             views: parseInt(item.statistics.viewCount) || 0,
             // [수정] 쇼츠 기준 60초 이하
             isShorts: durationSeconds > 0 && durationSeconds <= 180,
@@ -619,4 +620,46 @@ async function uploadAtlas(buffer) {
 
   // 3. 공개 URL 반환
   return file.publicUrl();
+}
+
+/**
+ * [HELPER] 비디오 제목을 정규화하고 이모지를 제거합니다.
+ *
+ * 1. (NFKD) 유니코드 정규화:
+ * - 스타일리시한 문자(𝒪)를 일반 문(O)으로 변환합니다.
+ * - 악센트 문자(É)를 (E + ´)로 분해합니다.
+ * - 완성형 한글(강)을 자모(ㄱ + ㅏ + ㅇ)로 분해합니다.
+ * 2. (replace) 결합 문자(악센트 등)를 제거합니다. (E + ´) -> E
+ * 3. (NFC) 유니코드 정규화:
+ * - 분해된 한글 자모(ㄱ + ㅏ + ㅇ)를 다시 완성형 한글(강)으로 조합합니다.
+ * - (파자된 한글 'ㄱㅏㅇ'도 '강'으로 합쳐집니다.)
+ * 4. (replace) 이모지를 제거합니다. (Unicode Property Escapes 사용)
+ * 5. (replace) 연속된 공백을 하나로 합치고 앞뒤 공백을 제거합니다.
+ *
+ * @param {string} title - 원본 비디오 제목
+ * @returns {string} - 전처리된 제목
+ */
+function preprocessTitle(title) {
+  if (typeof title !== "string" || !title) {
+    return title;
+  }
+
+  let processedTitle = title;
+
+  // 1, 2, 3: 특수 알파벳 정규화, 악센트 제거, 파자된 한글 조합
+  processedTitle = processedTitle
+    .normalize("NFKD") // 1. 분해
+    .replace(/[\u0300-\u036f]/g, "") // 2. 악센트 등 결합 문자 제거
+    .normalize("NFC"); // 3. 한글 등 재조합
+
+  // 4. 이모지 제거
+  // \p{Emoji_Presentation}: 표준 이모지 (e.g., 😊)
+  // \p{Extended_Pictographic}: 확장 그림 문자 (e.g., 🧑‍💻, 깃발 등)
+  const emojiRegex = /[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu;
+  processedTitle = processedTitle.replace(emojiRegex, "");
+
+  // 5. 공백 정리 (이모지 제거 등으로 생긴 연속 공백 처리)
+  processedTitle = processedTitle.replace(/\s+/g, " ").trim();
+
+  return processedTitle;
 }
