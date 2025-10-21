@@ -1,17 +1,13 @@
 // /functions/youtubeVideoSync.js
 const { onRequest } = require("firebase-functions/v2/https");
-const { onSchedule } = require("firebase-functions/v2/scheduler");
+// const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { logger } = require("firebase-functions");
 const { defineSecret } = require("firebase-functions/params"); // v2 방식의 비밀 관리
 const admin = require("firebase-admin");
 const { google } = require("googleapis");
-const axios = require("axios"); // [추가] 썸네일 다운로드에 필요
-const sharp = require("sharp"); // [추가] 이미지 처리에 필요
 
 // admin.initializeApp()는 index.js에서 이미 호출했으므로 여기서는 db만 가져옵니다.
 const db = admin.firestore();
-// Firebase Storage 버킷 가져오기
-const bucket = admin.storage().bucket();
 // YouTube API 키를 Firebase Secret Manager를 통해 안전하게 관리합니다.
 // (설정 방법은 아래 '중요: 설정 단계'를 참고하세요)
 const YOUTUBE_API_KEY = defineSecret("YOUTUBE_API_KEY");
@@ -78,26 +74,26 @@ async function runYouTubeSyncLogic() {
 /**
  * [TRIGGER 1: Schedule] 주기적으로 동기화를 실행합니다.
  */
-exports.syncYouTubeVideos = onSchedule(
-  {
-    schedule: "every 1 hours",
-    region: "asia-northeast3",
-    secrets: [YOUTUBE_API_KEY],
-    timeoutSeconds: 540,
-    memory: "512MiB",
-  },
-  async (event) => {
-    logger.info("SCHEDULED YouTube 동기화 작업을 시작합니다.");
-    try {
-      // 핵심 로직 호출
-      await runYouTubeSyncLogic();
-      logger.info("SCHEDULED YouTube 동기화 작업이 성공적으로 완료되었습니다.");
-    } catch (error) {
-      logger.error("SCHEDULED YouTube 동기화 작업 중 오류 발생:", error);
-    }
-    return null; // onSchedule 함수는 null 또는 Promise 반환
-  }
-);
+// exports.syncYouTubeVideos = onSchedule(
+//   {
+//     schedule: "every 1 hours",
+//     region: "asia-northeast3",
+//     secrets: [YOUTUBE_API_KEY],
+//     timeoutSeconds: 540,
+//     memory: "512MiB",
+//   },
+//   async (event) => {
+//     logger.info("SCHEDULED YouTube 동기화 작업을 시작합니다.");
+//     try {
+//       // 핵심 로직 호출
+//       await runYouTubeSyncLogic();
+//       logger.info("SCHEDULED YouTube 동기화 작업이 성공적으로 완료되었습니다.");
+//     } catch (error) {
+//       logger.error("SCHEDULED YouTube 동기화 작업 중 오류 발생:", error);
+//     }
+//     return null; // onSchedule 함수는 null 또는 Promise 반환
+//   }
+// );
 
 // -----------------------------------------------------------------
 // [트리거 2] 수동 실행을 위한 HTTP 함수 (신규)
@@ -197,44 +193,67 @@ async function processStreamer(streamerDoc, youtube) {
     );
   }
 }
-
 /**
- * [YouTube API] 1. 최근 1달간 업로드된 동영상의 ID 목록을 가져옵니다. (search.list)
+ * [YouTube API] 1. [수정됨] 업로드 재생목록을 조회하여 최근 1달간 동영상 ID 목록을 가져옵니다.
+ * - search.list (100 유닛) 대신 playlistItems.list (1 유닛)를 사용합니다.
+ * @param {string} channelId - 검색할 YouTube 채널 ID (e.g., UC...)
+ * @param {object} youtube - 초기화된 YouTube API v3 클라이언트
+ * @return {Promise<string[]>} 비디오 ID 문자열 배열
  */
 async function fetchRecentVideoIds(channelId, youtube) {
   const oneMonthAgo = new Date();
   oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+
+  // 1. 채널 ID(UC...)를 업로드 재생목록 ID(UU...)로 변환
+  const uploadsPlaylistId = channelId.replace("UC", "UU");
 
   const videoIds = [];
   let nextPageToken = null;
 
   try {
     do {
-      const response = await youtube.search.list({
-        part: "snippet",
-        channelId: channelId,
-        order: "date",
-        type: "video",
-        publishedAfter: oneMonthAgo.toISOString(), // 1달 전
+      const response = await youtube.playlistItems.list({
+        part: "snippet", // snippet에 publishedAt, videoId(resourceId)가 포함됨
+        playlistId: uploadsPlaylistId,
         maxResults: 50,
         pageToken: nextPageToken,
       });
 
+      let keepPaginating = true; // 1달이 지난 영상을 만나면 중단하기 위한 플래그
+
       if (response.data.items) {
-        response.data.items.forEach((item) => {
-          videoIds.push(item.id.videoId);
-        });
+        for (const item of response.data.items) {
+          const publishedAt = new Date(item.snippet.publishedAt);
+
+          if (publishedAt >= oneMonthAgo) {
+            // 1달 이내 영상이므로 ID 추가
+            videoIds.push(item.snippet.resourceId.videoId);
+          } else {
+            // 1달이 지난 영상을 만났으므로, 더 이상 다음 페이지를 탐색할 필요가 없음
+            keepPaginating = false;
+            break;
+          }
+        }
+      } else {
+        // 아이템이 없으면 중단
+        keepPaginating = false;
       }
+
       nextPageToken = response.data.nextPageToken;
+
+      // 1달 전 영상을 만났거나 다음 페이지가 없으면 루프 종료
+      if (!keepPaginating || !nextPageToken) {
+        nextPageToken = null;
+      }
     } while (nextPageToken);
 
     return videoIds;
   } catch (error) {
     logger.error(
-      `[YouTube API Error] search.list (${channelId}):`,
+      `[YouTube API Error] playlistItems.list (${uploadsPlaylistId}):`,
       error.message
     );
-    // 쿼터 초과 등의 에러가 발생해도 빈 배열을 반환하여 다음 로직 진행
+    // 404 (재생목록 못찾음) 등의 에러가 발생할 수 있음
     return [];
   }
 }

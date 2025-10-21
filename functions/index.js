@@ -10,7 +10,7 @@ admin.initializeApp();
 
 const axios = require("axios");
 const { onRequest } = require("firebase-functions/v2/https");
-const { syncYouTubeVideos, triggerYouTubeSync } = require("./youtubeVideoSync");
+const { triggerYouTubeSync } = require("./youtubeVideoSync");
 const { getAggregatedList } = require("./videosListApi");
 
 const db = admin.firestore();
@@ -172,6 +172,6 @@ exports.getStreamerStatus = onRequest(
   }
 );
 
-exports.syncYouTubeVideos = syncYouTubeVideos;
+// exports.syncYouTubeVideos = syncYouTubeVideos;
 exports.triggerYouTubeSync = triggerYouTubeSync;
 exports.getAggregatedList = getAggregatedList;
