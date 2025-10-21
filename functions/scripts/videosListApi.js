@@ -28,6 +28,8 @@ exports.getAggregatedList = onRequest(
         ? metadataDoc.data().updatedAt
         : null;
 
+      const atlasUrl = metadataDoc.exists ? metadataDoc.data().atlasUrl : null;
+
       // 2. 모든 스트리머 목록 가져오기 (from wakchidong/vuster/data 컬렉션)
       const streamersRef = db.collection("wakchidong/vuster/data");
       const streamersSnapshot = await streamersRef.get();
@@ -38,6 +40,7 @@ exports.getAggregatedList = onRequest(
           updatedAt: updatedAtTimestamp
             ? updatedAtTimestamp.toDate().toISOString()
             : null,
+          atlasUrl: atlasUrl,
           list: [],
         });
         return;
@@ -71,6 +74,7 @@ exports.getAggregatedList = onRequest(
             if (videoData.isShorts) {
               shortsList.push(videoObject);
             } else {
+              videoObject.thumbnailIndex = videoData.thumbnailIndex ?? null;
               longsList.push(videoObject);
             }
           });
@@ -93,6 +97,7 @@ exports.getAggregatedList = onRequest(
         updatedAt: updatedAtTimestamp
           ? updatedAtTimestamp.toDate().toISOString()
           : null,
+        atlasUrl: atlasUrl,
         list: aggregatedList,
       });
     } catch (error) {

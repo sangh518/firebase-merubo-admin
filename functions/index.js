@@ -1,177 +1,30 @@
-// firebase deploy --only functions
+// /functions/index.js
 
-// v2 API를 사용하기 위해 가져오는 방식이 변경되었습니다.
-const { onSchedule } = require("firebase-functions/v2/scheduler");
-const { logger } = require("firebase-functions"); // console.log 대신 logger를 권장합니다.
 const admin = require("firebase-admin");
 
-// Firebase 앱 초기화
+// Firebase 앱 초기화 (가장 먼저 한 번만 실행)
 admin.initializeApp();
 
-const axios = require("axios");
-const { onRequest } = require("firebase-functions/v2/https");
-const { triggerYouTubeSync } = require("./youtubeVideoSync");
-const { getAggregatedList } = require("./videosListApi");
+// --- YouTube 동기화 관련 ---
+const { triggerYouTubeSync } = require("./scripts/youtubeVideoSync");
+const { getAggregatedList } = require("./scripts/videosListApi");
 
-const db = admin.firestore();
+// --- SOOP 스트리머 상태 관련 ---
+// const {
+//   // updateStreamerStatus,
+//   getStreamerList,
+//   getStreamerStatus,
+// } = require("./scripts/soopStatusApi"); // [신규] 방금 만든 파일 임포트
 
-// v2 방식으로 스케줄 함수를 정의합니다.
-exports.updateStreamerStatus = onSchedule(
-  {
-    schedule: "every 1 minutes",
-    region: "asia-northeast3", // 옵션을 객체 안에 넣습니다.
-  },
-  async (event) => {
-    logger.info("스트리머 상태 확인 작업을 시작합니다.");
+// ===================================================================
+// Cloud Functions에 함수 등록
+// ===================================================================
 
-    const streamersRef = db.collection("wakchidong/data/streamers");
-    const snapshot = await streamersRef.get();
-
-    if (snapshot.empty) {
-      logger.info("DB에 등록된 스트리머가 없습니다.");
-      return null;
-    }
-
-    const updatePromises = snapshot.docs.map((doc) => {
-      const streamerId = doc.id;
-      const soopApiUrl = `https://api-channel.sooplive.co.kr/v1.1/channel/${streamerId}/home/section/broad`;
-
-      return axios
-        .get(soopApiUrl)
-        .then((response) => {
-          const streamerDocRef = doc.ref;
-          const now = admin.firestore.FieldValue.serverTimestamp();
-
-          if (response.data && response.data.currentSumViewer) {
-            const currentSumViewer = response.data.currentSumViewer;
-            logger.info(
-              `${streamerId}: 방송 중. 시청자 수: ${currentSumViewer}`
-            );
-            return streamerDocRef.update({
-              isLive: true,
-              viewers: currentSumViewer,
-              updatedAt: now,
-            });
-          } else {
-            logger.info(`${streamerId}: 방송 중이 아님.`);
-            return streamerDocRef.update({
-              isLive: false,
-              viewers: 0,
-              updatedAt: now,
-            });
-          }
-        })
-        .catch((error) => {
-          logger.error(
-            `${streamerId}의 상태 확인 중 에러 발생:`,
-            error.message
-          );
-        });
-    });
-
-    await Promise.all(updatePromises);
-    logger.info("모든 스트리머 상태 확인 작업이 완료되었습니다.");
-    return null;
-  }
-);
-
-// 스트리머 전체 목록을 조회하는 API 함수
-exports.getStreamerList = onRequest(
-  {
-    region: "asia-northeast3",
-    // 웹사이트 등 다른 도메인에서 이 API를 호출하려면 CORS 허용이 필수입니다.
-    cors: true,
-  },
-  async (req, res) => {
-    logger.info("스트리머 목록 조회 요청 수신");
-
-    try {
-      const streamersRef = db.collection("wakchidong/data/streamers");
-      const snapshot = await streamersRef.get();
-
-      if (snapshot.empty) {
-        logger.info("DB에 스트리머 데이터가 없습니다.");
-        // 데이터가 없어도 성공 응답으로 빈 배열을 보냅니다.
-        res.status(200).json({ data: [] });
-        return;
-      }
-
-      // Firestore 문서들을 깔끔한 객체 배열로 변환합니다.
-      const streamerList = snapshot.docs.map((doc) => {
-        const data = doc.data();
-        return {
-          streamerId: data.streamerId,
-          name: data.name,
-          isLive: data.isLive,
-          viewers: data.viewers,
-          // JavaScript에서 사용할 수 있도록 Timestamp를 ISO 문자열로 변환
-          updatedAt: data.updatedAt.toDate().toISOString(),
-        };
-      });
-
-      // 성공적으로 데이터를 조회했으면 JSON 형태로 응답합니다.
-      res.status(200).json({ data: streamerList });
-    } catch (error) {
-      logger.error("스트리머 목록 조회 중 에러 발생:", error);
-      res.status(500).json({
-        status: "error",
-        message: "Failed to retrieve streamer list.",
-      });
-    }
-  }
-);
-
-/**
- * [신규] 특정 스트리머의 현재 상태를 즉시 조회하여 반환하는 API
- * - 클라이언트에서 5초마다 직접 호출하기 위한 용도입니다.
- */
-exports.getStreamerStatus = onRequest(
-  {
-    region: "asia-northeast3",
-    cors: true, // 웹사이트에서 호출할 수 있도록 CORS 허용
-  },
-  async (req, res) => {
-    // GET 요청의 쿼리 파라미터에서 streamerId를 가져옵니다. (e.g., /getStreamerStatus?streamerId=...)
-    const { streamerId } = req.query;
-    if (!streamerId) {
-      return res
-        .status(400)
-        .json({ error: "Query parameter 'streamerId' is required." });
-    }
-
-    logger.info(`실시간 상태 조회 요청: ${streamerId}`);
-    const soopApiUrl = `https://api-channel.sooplive.co.kr/v1.1/channel/${streamerId}/home/section/broad`;
-
-    try {
-      const response = await axios.get(soopApiUrl);
-      let isLive = false;
-      let viewers = 0;
-
-      if (response.data && response.data.currentSumViewer) {
-        isLive = true;
-        viewers = response.data.currentSumViewer;
-      }
-
-      // 클라이언트에게 실시간 데이터를 즉시 반환
-      res.status(200).json({
-        streamerId: streamerId,
-        isLive: isLive,
-        viewers: viewers,
-        retrievedAt: new Date().toISOString(), // 조회된 시간
-      });
-    } catch (error) {
-      logger.error(
-        `실시간 상태 조회 중 에러 발생 (${streamerId}):`,
-        error.message
-      );
-      res.status(500).json({
-        status: "error",
-        message: `Failed to retrieve status for ${streamerId}.`,
-      });
-    }
-  }
-);
-
-// exports.syncYouTubeVideos = syncYouTubeVideos;
+// YouTube 동기화
 exports.triggerYouTubeSync = triggerYouTubeSync;
 exports.getAggregatedList = getAggregatedList;
+
+// SOOP 스트리머 상태
+// exports.updateStreamerStatus = updateStreamerStatus;
+// exports.getStreamerList = getStreamerList;
+// exports.getStreamerStatus = getStreamerStatus;
